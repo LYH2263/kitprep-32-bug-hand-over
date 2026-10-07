@@ -27,4 +27,5 @@ def void_order(order_id: int, db: Session = Depends(get_db)):
 
 
 def hand_edit_guard(order_status: str | None) -> bool:
-    return True
+    """作废单禁止再改备料（手改、弹层、重新生成都走这一道闸）。"""
+    return order_status != "voided"

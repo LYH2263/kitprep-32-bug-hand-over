@@ -82,8 +82,6 @@ onMounted(async () => {
 })
 </script>
 <template>
-  <!-- handOverHint: over-need edit may persist without reserved sync -->
-
   <h1>备料工作台</h1>
   <p class="sub">左 BOM 树 · 中备料表 · 右缺料便利贴 · 顶栏订单芯片</p>
   <div class="kp-chips" style="margin-bottom:0.75rem" v-if="orders.length">
@@ -91,7 +89,7 @@ onMounted(async () => {
       {{ o.code }} · {{ o.outlet }}<template v-if="o.status !== 'open'"> · {{ o.status }}</template>
     </span>
   </div>
-  <button class="btn" @click="regen">生成备料单</button>
+  <button class="btn" :disabled="isVoided()" @click="regen">生成备料单</button>
   <p v-if="error" class="kp-error">⚠ {{ error }}</p>
   <div class="kp-workbench" style="margin-top:0.85rem">
     <aside class="kp-bom-tree">

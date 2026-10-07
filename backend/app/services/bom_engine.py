@@ -96,9 +96,10 @@ def apply_manual_qty(result: dict, ingredient_id: int, qty: float) -> dict:
 
     Validates everything before changing anything: raises KeyError if the line
     is absent, ValueError if qty is negative/non-finite or exceeds the line's
-    current demand (need_qty). On success returns a new result dict where the
+    current demand (need_qty). On success returns a NEW result dict where the
     line's qty, reservation, shortage and the run-level stats move together;
-    on failure the caller's snapshot is left untouched.
+    the passed-in snapshot is never mutated, so on failure the caller's data is
+    left exactly as it was.
     """
     data = normalize_result(result)
     target = next((l for l in data["prep_lines"] if l["ingredient_id"] == ingredient_id), None)
@@ -107,12 +108,17 @@ def apply_manual_qty(result: dict, ingredient_id: int, qty: float) -> dict:
     if not math.isfinite(qty) or qty < 0:
         raise ValueError("数量必须是不小于 0 的数字")
     qty = round(qty, ROUND)
+    need = float(target["need_qty"])
+    if qty > need:
+        raise ValueError(f"备料量不能超过该行当前需求 {need:g}")
+    stock = float(target["stock_qty"])
     new_lines: list[dict] = []
     for l in data["prep_lines"]:
         line = dict(l)
         if line["ingredient_id"] == ingredient_id:
             line["prep_qty"] = qty
-            line["shortage"] = round(max(0.0, qty - float(line.get("stock_qty", 0))), ROUND)
-            # reserved_qty deliberately left unchanged
+            # 数量与占用同成同败:占用 = min(实备, 库存),缺料随之重算
+            line["reserved_qty"] = round(min(qty, stock), ROUND)
+            line["shortage"] = round(max(0.0, qty - stock), ROUND)
         new_lines.append(line)
     return {**data, **_recalc(new_lines)}

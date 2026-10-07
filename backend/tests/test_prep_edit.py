@@ -161,3 +161,81 @@ def test_archived_run_is_not_rewritten_by_manual_edit(env):
     ok = client.patch(f"/api/prep/runs/{new['id']}/lines/{ids['ingredient_id']}", json={"qty": 5})
     assert ok.status_code == 200
     assert _line(ok.json(), ids["ingredient_id"])["prep_qty"] == 5.0
+
+
+def _inventory(client, ingredient_id):
+    return next(r for r in client.get("/api/inventory").json() if r["id"] == ingredient_id)
+
+
+# ---------- 数量与占用同成同败:库存可再用 ----------
+
+def test_inventory_available_moves_with_reservation(env):
+    client, ids, _ = env
+    run = client.post(f"/api/prep/run?order_id={ids['order_id']}").json()
+    inv = _inventory(client, ids["ingredient_id"])
+    assert (inv["stock_qty"], inv["reserved_qty"], inv["available_qty"]) == (8.0, 8.0, 0.0)
+    # 行上备料量拧到 6:占用 8→6,可再用 0→2,一次保存同成同败
+    res = client.patch(f"/api/prep/runs/{run['id']}/lines/{ids['ingredient_id']}", json={"qty": 6})
+    assert res.status_code == 200
+    inv = _inventory(client, ids["ingredient_id"])
+    assert (inv["reserved_qty"], inv["available_qty"]) == (6.0, 2.0)
+
+
+def test_over_demand_failure_leaves_inventory_reservation_at_before(env):
+    client, ids, _ = env
+    run = client.post(f"/api/prep/run?order_id={ids['order_id']}").json()
+    client.patch(f"/api/prep/runs/{run['id']}/lines/{ids['ingredient_id']}", json={"qty": 6})
+    assert _inventory(client, ids["ingredient_id"])["reserved_qty"] == 6.0
+    # 超需求整单退回:库存页占用停在改前
+    res = client.patch(f"/api/prep/runs/{run['id']}/lines/{ids['ingredient_id']}", json={"qty": 10.5})
+    assert res.status_code == 400
+    assert _inventory(client, ids["ingredient_id"])["reserved_qty"] == 6.0
+
+
+def test_voided_order_no_longer_reserves_inventory(env):
+    client, ids, _ = env
+    client.post(f"/api/prep/run?order_id={ids['order_id']}").json()
+    assert _inventory(client, ids["ingredient_id"])["reserved_qty"] == 8.0
+    client.post(f"/api/orders/{ids['order_id']}/void")
+    inv = _inventory(client, ids["ingredient_id"])
+    assert (inv["reserved_qty"], inv["available_qty"]) == (0.0, 8.0)
+
+
+# ---------- 缺料贴与备料台同口径 ----------
+
+def test_shortages_sticky_follows_manual_edit(env):
+    client, ids, _ = env
+    run = client.post(f"/api/prep/run?order_id={ids['order_id']}").json()
+    # 需 10 库 8:缺料贴先挂 2
+    sticky = client.get(f"/api/prep/shortages?order_id={ids['order_id']}").json()
+    row = next(r for r in sticky["shortages"] if r["ingredient_id"] == ids["ingredient_id"])
+    assert row["shortage"] == 2.0
+    # 拧到 6(库存内):缺料贴撤下
+    client.patch(f"/api/prep/runs/{run['id']}/lines/{ids['ingredient_id']}", json={"qty": 6})
+    sticky = client.get(f"/api/prep/shortages?order_id={ids['order_id']}").json()
+    assert all(r["ingredient_id"] != ids["ingredient_id"] for r in sticky["shortages"])
+    assert sticky["stats"]["shortage_count"] == 0
+
+
+def test_shortages_sticky_unchanged_after_failed_edit(env):
+    client, ids, _ = env
+    run = client.post(f"/api/prep/run?order_id={ids['order_id']}").json()
+    res = client.patch(f"/api/prep/runs/{run['id']}/lines/{ids['ingredient_id']}", json={"qty": 10.5})
+    assert res.status_code == 400
+    sticky = client.get(f"/api/prep/shortages?order_id={ids['order_id']}").json()
+    row = next(r for r in sticky["shortages"] if r["ingredient_id"] == ids["ingredient_id"])
+    assert row["shortage"] == 2.0  # 失败不留半成功,缺料贴停在改前
+
+
+# ---------- 作废单禁止再改:含重新生成 ----------
+
+def test_voided_order_cannot_regenerate_run(env):
+    client, ids, _ = env
+    first = client.post(f"/api/prep/run?order_id={ids['order_id']}").json()
+    client.post(f"/api/orders/{ids['order_id']}/void")
+    res = client.post(f"/api/prep/run?order_id={ids['order_id']}")
+    assert res.status_code == 409
+    # 没有新备料单产生,最新仍是作废前那张
+    latest = client.get(f"/api/prep/latest?order_id={ids['order_id']}").json()
+    assert latest["id"] == first["id"]
+    assert latest["order"]["status"] == "voided"
