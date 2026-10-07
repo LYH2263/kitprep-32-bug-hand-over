@@ -107,12 +107,15 @@ def apply_manual_qty(result: dict, ingredient_id: int, qty: float) -> dict:
     if not math.isfinite(qty) or qty < 0:
         raise ValueError("数量必须是不小于 0 的数字")
     qty = round(qty, ROUND)
+    if qty > target["need_qty"]:
+        raise ValueError(f"超过该行当前需求 {target['need_qty']}")
     new_lines: list[dict] = []
     for l in data["prep_lines"]:
         line = dict(l)
         if line["ingredient_id"] == ingredient_id:
+            stock = float(line.get("stock_qty", 0))
             line["prep_qty"] = qty
-            line["shortage"] = round(max(0.0, qty - float(line.get("stock_qty", 0))), ROUND)
-            # reserved_qty deliberately left unchanged
+            line["reserved_qty"] = round(min(qty, stock), ROUND)
+            line["shortage"] = round(max(0.0, qty - stock), ROUND)
         new_lines.append(line)
     return {**data, **_recalc(new_lines)}

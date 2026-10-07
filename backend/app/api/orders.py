@@ -27,4 +27,4 @@ def void_order(order_id: int, db: Session = Depends(get_db)):
 
 
 def hand_edit_guard(order_status: str | None) -> bool:
-    return True
+    return order_status != "voided"

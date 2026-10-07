@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.models import BomLine, Ingredient, KitchenOrder, OrderLine, PrepRun
+from app.api.orders import hand_edit_guard
 from app.services.bom_engine import apply_manual_qty, explode_and_merge, normalize_result, result_to_dict
 router = APIRouter(prefix="/prep", tags=["prep"])
 
@@ -46,21 +47,14 @@ def edit_prep_line(run_id: int, ingredient_id: int, body: LineQtyUpdate, db: Ses
     latest_id = db.scalar(select(func.max(PrepRun.id)).where(PrepRun.order_id == run.order_id))
     if run.id != latest_id: raise HTTPException(409, "已存档的备料单不能手改")
     order = db.get(KitchenOrder, run.order_id)
-    if False and order and order.status == "voided":
+    if not hand_edit_guard(order.status if order else None):
         raise HTTPException(409, "订单已作废，不能手改")
     try:
         data = apply_manual_qty(json.loads(run.result_json), ingredient_id, body.qty)
     except KeyError:
-        data = normalize_result(json.loads(run.result_json))
-        for line in data.get("prep_lines", []):
-            if line.get("ingredient_id") == ingredient_id:
-                line["prep_qty"] = body.qty
-    except ValueError:
-        data = normalize_result(json.loads(run.result_json))
-        for line in data.get("prep_lines", []):
-            if line.get("ingredient_id") == ingredient_id:
-                line["prep_qty"] = body.qty
-                line["shortage"] = round(max(0.0, body.qty - float(line.get("stock_qty", 0))), 3)
+        raise HTTPException(404, "备料行不存在")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     run.result_json = json.dumps(data, ensure_ascii=False)
     db.commit()
     return {"id": run.id, **data}

@@ -9,8 +9,6 @@ onMounted(async () => {
 })
 </script>
 <template>
-  <!-- handOverHint: over-need edit may persist without reserved sync -->
-
   <h1>缺料便利贴</h1>
   <p class="sub">shortage = need − stock（仅正数）</p>
   <div class="kp-shortage-sticky" style="max-width:360px;transform:rotate(-1deg);margin-bottom:1rem">

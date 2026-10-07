@@ -82,8 +82,6 @@ onMounted(async () => {
 })
 </script>
 <template>
-  <!-- handOverHint: over-need edit may persist without reserved sync -->
-
   <h1>备料工作台</h1>
   <p class="sub">左 BOM 树 · 中备料表 · 右缺料便利贴 · 顶栏订单芯片</p>
   <div class="kp-chips" style="margin-bottom:0.75rem" v-if="orders.length">
